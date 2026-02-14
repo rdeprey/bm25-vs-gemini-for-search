@@ -1,0 +1,18 @@
+app = "bm25-vs-gemini"
+primary_region = "sjc"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[mounts]
+  source = "data"
+  destination = "/app/data"
