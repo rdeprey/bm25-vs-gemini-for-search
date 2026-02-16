@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 const s = {
   wrapper: {
-    maxWidth: 1200,
+    maxWidth: 1600,
     margin: "0 auto",
     padding: "48px 24px",
     position: "relative",
@@ -27,7 +27,7 @@ const s = {
   } as React.CSSProperties,
   infoBox: {
     marginTop: 20,
-    maxWidth: 640,
+    maxWidth: 720,
     marginLeft: "auto",
     marginRight: "auto",
     textAlign: "left" as const,
@@ -123,7 +123,7 @@ const s = {
   } as React.CSSProperties,
   grid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: "1fr 1fr 1fr",
     gap: 24,
   } as React.CSSProperties,
   colHeader: {
@@ -203,13 +203,20 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [bm25, setBm25] = useState<any[]>([]);
   const [gemini, setGemini] = useState("");
+  const [lancedbResults, setLancedbResults] = useState<any[]>([]);
   const [bm25Time, setBm25Time] = useState<number | null>(null);
   const [geminiTime, setGeminiTime] = useState<number | null>(null);
+  const [lancedbTime, setLancedbTime] = useState<number | null>(null);
   const [geminiLoading, setGeminiLoading] = useState(false);
   const [geminiElapsed, setGeminiElapsed] = useState<number>(0);
+  const [lancedbLoading, setLancedbLoading] = useState(false);
+  const [lancedbElapsed, setLancedbElapsed] = useState<number>(0);
   const geminiAbort = useRef<AbortController | null>(null);
   const geminiTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const geminiStart = useRef<number>(0);
+  const lancedbAbort = useRef<AbortController | null>(null);
+  const lancedbTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lancedbStart = useRef<number>(0);
 
   useEffect(() => {
     fetch("/api/sample-doc")
@@ -218,24 +225,37 @@ export default function Page() {
   }, []);
 
   async function indexDoc() {
-    await fetch("/api/index", {
+    const r = await fetch("/api/index", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ docId: "demo", text }),
     });
-    alert("Indexed!");
+    const j = await r.json();
+    if (j.vectorError) {
+      alert(`Indexed ${j.chunks} chunks for BM25, but vector indexing failed: ${j.vectorError}`);
+    } else if (j.error) {
+      alert(`Indexing failed: ${j.error}`);
+    } else {
+      alert(`Indexed ${j.chunks} chunks (BM25 + vectors)`);
+    }
   }
 
   async function runBm25() {
     const start = performance.now();
-    const r = await fetch("/api/search/bm25", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ docId: "demo", query }),
-    });
-    const j = await r.json();
-    setBm25Time(performance.now() - start);
-    setBm25(j.results || []);
+    try {
+      const r = await fetch("/api/search/bm25", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docId: "demo", query }),
+      });
+      const text = await r.text();
+      const j = text ? JSON.parse(text) : { results: [] };
+      setBm25Time(performance.now() - start);
+      setBm25(j.results || []);
+    } catch {
+      setBm25Time(performance.now() - start);
+      setBm25([]);
+    }
   }
 
   async function runGemini() {
@@ -275,6 +295,39 @@ export default function Page() {
     }
   }
 
+  async function runLanceDb() {
+    lancedbAbort.current?.abort();
+    if (lancedbTimer.current) clearInterval(lancedbTimer.current);
+    const controller = new AbortController();
+    lancedbAbort.current = controller;
+    setLancedbLoading(true);
+    setLancedbTime(null);
+    setLancedbResults([]);
+    setLancedbElapsed(0);
+    lancedbStart.current = performance.now();
+    lancedbTimer.current = setInterval(() => {
+      setLancedbElapsed(performance.now() - lancedbStart.current);
+    }, 100);
+    try {
+      const r = await fetch("/api/search/lancedb", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docId: "demo", query }),
+        signal: controller.signal,
+      });
+      const j = await r.json();
+      setLancedbTime(performance.now() - lancedbStart.current);
+      setLancedbResults(j.results || []);
+    } catch (e: any) {
+      if (e.name === "AbortError") {
+        setLancedbResults([]);
+      }
+    } finally {
+      if (lancedbTimer.current) clearInterval(lancedbTimer.current);
+      setLancedbLoading(false);
+    }
+  }
+
   function formatTime(ms: number): string {
     if (ms >= 60000) return `${(ms / 60000).toFixed(1)}m`;
     if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
@@ -283,6 +336,10 @@ export default function Page() {
 
   function cancelGemini() {
     geminiAbort.current?.abort();
+  }
+
+  function cancelLanceDb() {
+    lancedbAbort.current?.abort();
   }
 
   function highlight(text: string): React.ReactNode {
@@ -307,6 +364,7 @@ export default function Page() {
   }
 
   const best = bm25.length ? Math.min(...bm25.map((r) => r.score)) : 0;
+  const bestLancedb = lancedbResults.length ? Math.max(...lancedbResults.map((r) => r.score)) : 0;
 
   return (
     <div style={s.wrapper}>
@@ -330,8 +388,8 @@ export default function Page() {
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
           </svg>
         </a>
-        <h1 style={s.title}>BM25 vs Gemini</h1>
-        <p style={s.subtitle}>Compare local full-text search with AI-powered retrieval</p>
+        <h1 style={s.title}>BM25 vs Gemini vs Vector Search</h1>
+        <p style={s.subtitle}>Compare local full-text search, AI-powered retrieval, and semantic vector search</p>
         <div style={s.infoBox}>
           <p>
             <strong>BM25</strong> is a ranking algorithm built into SQLite via its
@@ -344,6 +402,12 @@ export default function Page() {
             <strong>Gemini 3 Flash</strong> is Google{"'"}s fast multimodal model. It
             reads the full document and reasons about your query to produce a
             natural-language answer. Powerful, but requires a network round-trip.
+          </p>
+          <p style={{ marginTop: 8 }}>
+            <strong>Vector Search</strong> uses Gemini embeddings to convert text into
+            high-dimensional vectors, then finds chunks whose meaning is closest to your
+            query via cosine similarity in LanceDB. It captures semantic meaning beyond
+            exact keyword matches.
           </p>
         </div>
       </header>
@@ -369,9 +433,9 @@ export default function Page() {
             placeholder="Enter your search query..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { runBm25(); runGemini(); } }}
+            onKeyDown={(e) => { if (e.key === "Enter") { runBm25(); runGemini(); runLanceDb(); } }}
           />
-          <button style={s.btnPrimary} onClick={() => { runBm25(); runGemini(); }}>Search</button>
+          <button style={s.btnPrimary} onClick={() => { runBm25(); runGemini(); runLanceDb(); }}>Search</button>
         </div>
       </div>
 
@@ -416,6 +480,39 @@ export default function Page() {
           {!gemini && !geminiLoading && <p style={s.empty}>No results yet</p>}
           {geminiLoading && !gemini && <p style={s.empty}>Thinking...</p>}
           {gemini && <pre style={s.geminiOutput}>{highlight(gemini)}</pre>}
+        </div>
+
+        <div style={s.card}>
+          <div style={s.colHeader}>
+            <span style={s.colTitle}>Vector Search</span>
+            {lancedbTime !== null && <span style={s.badge}>{formatTime(lancedbTime)}</span>}
+            {lancedbLoading && <span style={s.badge}>{formatTime(lancedbElapsed)}</span>}
+            {lancedbLoading && (
+              <button style={s.btnCancel} onClick={cancelLanceDb}>Cancel</button>
+            )}
+          </div>
+          {lancedbResults.length === 0 && !lancedbLoading && <p style={s.empty}>No results yet</p>}
+          {lancedbLoading && lancedbResults.length === 0 && <p style={s.empty}>Searching...</p>}
+          {lancedbResults.map((r, i) => {
+            const pct = bestLancedb ? Math.round((r.score / bestLancedb) * 100) : 0;
+            return (
+              <div key={i} style={s.resultCard}>
+                <div style={s.scoreRow}>
+                  <div style={s.barTrack}>
+                    <div style={{
+                      width: `${pct}%`,
+                      height: "100%",
+                      borderRadius: 3,
+                      background: `linear-gradient(90deg, #00b894, #55efc4)`,
+                      transition: "width 0.3s ease",
+                    }} />
+                  </div>
+                  <span style={s.scoreMeta}>{r.score.toFixed(4)} ({pct}%)</span>
+                </div>
+                <div style={s.resultText}>{highlight(r.text)}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
