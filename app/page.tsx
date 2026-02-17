@@ -1,9 +1,20 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import type {
+  SearchLaneResult,
+  SearchSettings,
+  AgentTrace,
+} from "@/lib/types";
+import { DEFAULT_SETTINGS } from "@/lib/types";
+import SearchLane from "@/components/SearchLane";
+import AnswerBlock from "@/components/AnswerBlock";
+import AgentTraceBox from "@/components/AgentTraceBox";
+import SettingsPanel from "@/components/SettingsPanel";
+import PresetBar from "@/components/PresetBar";
 
 const s = {
   wrapper: {
-    maxWidth: 1600,
+    maxWidth: 1800,
     margin: "0 auto",
     padding: "48px 24px",
     position: "relative",
@@ -13,7 +24,7 @@ const s = {
     marginBottom: 48,
   } as React.CSSProperties,
   title: {
-    fontSize: 48,
+    fontSize: 44,
     fontWeight: 800,
     letterSpacing: "-0.03em",
     background: "linear-gradient(135deg, #6c5ce7, #a29bfe, #74b9ff)",
@@ -27,7 +38,7 @@ const s = {
   } as React.CSSProperties,
   infoBox: {
     marginTop: 20,
-    maxWidth: 720,
+    maxWidth: 800,
     marginLeft: "auto",
     marginRight: "auto",
     textAlign: "left" as const,
@@ -110,167 +121,202 @@ const s = {
     transition: "all 0.2s",
     whiteSpace: "nowrap" as const,
   } as React.CSSProperties,
-  btnCancel: {
-    background: "transparent",
-    color: "#ff6b6b",
-    border: "1px solid #ff6b6b44",
-    borderRadius: 8,
-    padding: "6px 14px",
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-    marginLeft: 12,
-  } as React.CSSProperties,
   grid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr 1fr",
-    gap: 24,
+    gridTemplateColumns: "repeat(4, 1fr)",
+    gap: 20,
   } as React.CSSProperties,
-  colHeader: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 20,
-  } as React.CSSProperties,
-  colTitle: {
-    fontSize: 18,
-    fontWeight: 700,
-  } as React.CSSProperties,
-  badge: {
+  indexInfo: {
     fontSize: 12,
-    fontWeight: 600,
-    padding: "3px 10px",
-    borderRadius: 20,
-    background: "var(--surface-2)",
-    border: "1px solid var(--border)",
     color: "var(--text-muted)",
-  } as React.CSSProperties,
-  resultCard: {
-    background: "var(--surface-2)",
-    border: "1px solid var(--border)",
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 12,
-    transition: "border-color 0.2s",
-  } as React.CSSProperties,
-  scoreRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 10,
-  } as React.CSSProperties,
-  barTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: 3,
-    background: "var(--border)",
-    overflow: "hidden",
-  } as React.CSSProperties,
-  scoreMeta: {
-    fontSize: 11,
+    marginTop: 8,
     fontFamily: "'SF Mono', 'Fira Code', monospace",
-    color: "var(--text-muted)",
-    whiteSpace: "nowrap" as const,
-  } as React.CSSProperties,
-  resultText: {
-    fontSize: 13,
-    lineHeight: 1.7,
-    color: "var(--text-muted)",
-    maxHeight: 160,
-    overflow: "auto",
-  } as React.CSSProperties,
-  geminiOutput: {
-    whiteSpace: "pre-wrap" as const,
-    fontSize: 14,
-    lineHeight: 1.8,
-    color: "var(--text)",
-    fontFamily: "inherit",
-    background: "var(--surface-2)",
-    border: "1px solid var(--border)",
-    borderRadius: 10,
-    padding: 20,
-  } as React.CSSProperties,
-  empty: {
-    color: "var(--text-muted)",
-    fontSize: 14,
-    textAlign: "center" as const,
-    padding: 40,
   } as React.CSSProperties,
 };
 
 export default function Page() {
   const [text, setText] = useState("");
   const [query, setQuery] = useState("");
-  const [bm25, setBm25] = useState<any[]>([]);
-  const [gemini, setGemini] = useState("");
-  const [lancedbResults, setLancedbResults] = useState<any[]>([]);
-  const [bm25Time, setBm25Time] = useState<number | null>(null);
-  const [geminiTime, setGeminiTime] = useState<number | null>(null);
-  const [lancedbTime, setLancedbTime] = useState<number | null>(null);
+  const [settings, setSettings] = useState<SearchSettings>(DEFAULT_SETTINGS);
+  const [indexInfo, setIndexInfo] = useState("");
+  const [indexing, setIndexing] = useState(false);
+  const [indexProgress, setIndexProgress] = useState(0);
+  const [indexStage, setIndexStage] = useState("");
+
+  // Lane results
+  const [bm25Result, setBm25Result] = useState<SearchLaneResult | null>(null);
+  const [geminiResult, setGeminiResult] = useState<SearchLaneResult | null>(null);
+  const [vectorResult, setVectorResult] = useState<SearchLaneResult | null>(null);
+  const [hybridResult, setHybridResult] = useState<SearchLaneResult | null>(null);
+
+  // Loading states
+  const [bm25Loading, setBm25Loading] = useState(false);
   const [geminiLoading, setGeminiLoading] = useState(false);
-  const [geminiElapsed, setGeminiElapsed] = useState<number>(0);
-  const [lancedbLoading, setLancedbLoading] = useState(false);
-  const [lancedbElapsed, setLancedbElapsed] = useState<number>(0);
+  const [vectorLoading, setVectorLoading] = useState(false);
+  const [hybridLoading, setHybridLoading] = useState(false);
+
+  // Elapsed timers
+  const [geminiElapsed, setGeminiElapsed] = useState(0);
+  const [vectorElapsed, setVectorElapsed] = useState(0);
+  const [hybridElapsed, setHybridElapsed] = useState(0);
+
+  // Abort controllers & timers
   const geminiAbort = useRef<AbortController | null>(null);
   const geminiTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const geminiStart = useRef<number>(0);
-  const lancedbAbort = useRef<AbortController | null>(null);
-  const lancedbTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lancedbStart = useRef<number>(0);
+  const geminiStart = useRef(0);
+  const vectorAbort = useRef<AbortController | null>(null);
+  const vectorTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const vectorStart = useRef(0);
+  const hybridAbort = useRef<AbortController | null>(null);
+  const hybridTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hybridStart = useRef(0);
 
   useEffect(() => {
     fetch("/api/sample-doc")
       .then((r) => r.json())
-      .then((j) => { if (j.text) setText(j.text); });
+      .then((j) => {
+        if (j.text) setText(j.text);
+      });
   }, []);
 
   async function indexDoc() {
-    const r = await fetch("/api/index", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ docId: "demo", text }),
-    });
-    const j = await r.json();
-    if (j.vectorError) {
-      alert(`Indexed ${j.chunks} chunks for BM25, but vector indexing failed: ${j.vectorError}`);
-    } else if (j.error) {
-      alert(`Indexing failed: ${j.error}`);
-    } else {
-      alert(`Indexed ${j.chunks} chunks (BM25 + vectors)`);
+    setIndexing(true);
+    setIndexProgress(0);
+    setIndexStage("Starting...");
+    setIndexInfo("");
+
+    try {
+      const r = await fetch("/api/index", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          docId: "demo",
+          text,
+          chunkingMode: settings.useChapterChunking ? "chapter" : "fixed",
+          settings,
+        }),
+      });
+
+      const reader = r.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const match = line.match(/^data: (.+)$/m);
+          if (!match) continue;
+          try {
+            const data = JSON.parse(match[1]);
+            setIndexProgress(data.progress ?? 0);
+
+            if (data.stage === "chunking") {
+              setIndexStage("Chunking text...");
+            } else if (data.stage === "chunked") {
+              setIndexStage(`${data.chunks} chunks created`);
+            } else if (data.stage === "embedding") {
+              setIndexStage(
+                `Embedding ${data.embedded}/${data.total} chunks...`
+              );
+            } else if (data.stage === "storing") {
+              setIndexStage("Storing vectors...");
+            } else if (data.stage === "done") {
+              const sectionInfo = data.sections
+                ? ` | ${data.sections.length} sections`
+                : "";
+              setIndexInfo(
+                `${data.chunks} chunks | ${data.chunkingMode} mode${sectionInfo} | ${data.indexTimeMs}ms`
+              );
+              setIndexStage("Done!");
+            } else if (data.stage === "error") {
+              setIndexInfo(
+                `${data.indexTimeMs}ms | vector error: ${data.vectorError}`
+              );
+              setIndexStage("Completed with errors");
+            }
+          } catch {
+            // ignore malformed SSE lines
+          }
+        }
+      }
+    } catch (e: any) {
+      setIndexStage("Failed");
+      setIndexInfo(e.message || "Indexing failed");
+    } finally {
+      setTimeout(() => {
+        setIndexing(false);
+        setIndexProgress(0);
+        setIndexStage("");
+      }, 1500);
     }
   }
 
   async function runBm25() {
-    const start = performance.now();
+    setBm25Loading(true);
+    setBm25Result(null);
     try {
       const r = await fetch("/api/search/bm25", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docId: "demo", query }),
+        body: JSON.stringify({
+          docId: "demo",
+          query,
+          topK: settings.bm25TopK,
+        }),
       });
-      const text = await r.text();
-      const j = text ? JSON.parse(text) : { results: [] };
-      setBm25Time(performance.now() - start);
-      setBm25(j.results || []);
+      const j = await r.json();
+      if (j.passages) {
+        setBm25Result(j);
+      } else {
+        setBm25Result({
+          passages: [],
+          timing: { totalMs: 0, steps: [] },
+        });
+      }
     } catch {
-      setBm25Time(performance.now() - start);
-      setBm25([]);
+      setBm25Result({ passages: [], timing: { totalMs: 0, steps: [] } });
+    } finally {
+      setBm25Loading(false);
+    }
+  }
+
+  function startTimer(
+    startRef: React.MutableRefObject<number>,
+    timerRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>,
+    setElapsed: (ms: number) => void
+  ) {
+    startRef.current = performance.now();
+    timerRef.current = setInterval(() => {
+      setElapsed(performance.now() - startRef.current);
+    }, 100);
+  }
+
+  function stopTimer(
+    timerRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>
+  ) {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
   }
 
   async function runGemini() {
     geminiAbort.current?.abort();
-    if (geminiTimer.current) clearInterval(geminiTimer.current);
+    stopTimer(geminiTimer);
     const controller = new AbortController();
     geminiAbort.current = controller;
     setGeminiLoading(true);
-    setGeminiTime(null);
-    setGemini("");
+    setGeminiResult(null);
     setGeminiElapsed(0);
-    geminiStart.current = performance.now();
-    geminiTimer.current = setInterval(() => {
-      setGeminiElapsed(performance.now() - geminiStart.current);
-    }, 100);
+    startTimer(geminiStart, geminiTimer, setGeminiElapsed);
     try {
       const r = await fetch("/api/search/gemini", {
         method: "POST",
@@ -278,54 +324,136 @@ export default function Page() {
         body: JSON.stringify({ docId: "demo", query }),
         signal: controller.signal,
       });
-      const text = await r.text();
-      let j;
-      try { j = JSON.parse(text); } catch { j = { error: text || "Empty response from server" }; }
-      setGeminiTime(performance.now() - geminiStart.current);
-      setGemini(j.output || j.error);
+      const j = await r.json();
+      if (j.passages) {
+        setGeminiResult(j);
+      } else if (j.error) {
+        setGeminiResult({
+          passages: [],
+          answer: j.error,
+          timing: {
+            totalMs: Math.round(performance.now() - geminiStart.current),
+            steps: [],
+          },
+        });
+      }
     } catch (e: any) {
-      if (e.name === "AbortError") {
-        setGemini("Cancelled.");
-      } else {
-        setGemini(e.message || "Request failed");
+      if (e.name !== "AbortError") {
+        setGeminiResult({
+          passages: [],
+          answer: e.message || "Request failed",
+          timing: {
+            totalMs: Math.round(performance.now() - geminiStart.current),
+            steps: [],
+          },
+        });
       }
     } finally {
-      if (geminiTimer.current) clearInterval(geminiTimer.current);
+      stopTimer(geminiTimer);
       setGeminiLoading(false);
     }
   }
 
-  async function runLanceDb() {
-    lancedbAbort.current?.abort();
-    if (lancedbTimer.current) clearInterval(lancedbTimer.current);
+  async function runVector() {
+    vectorAbort.current?.abort();
+    stopTimer(vectorTimer);
     const controller = new AbortController();
-    lancedbAbort.current = controller;
-    setLancedbLoading(true);
-    setLancedbTime(null);
-    setLancedbResults([]);
-    setLancedbElapsed(0);
-    lancedbStart.current = performance.now();
-    lancedbTimer.current = setInterval(() => {
-      setLancedbElapsed(performance.now() - lancedbStart.current);
-    }, 100);
+    vectorAbort.current = controller;
+    setVectorLoading(true);
+    setVectorResult(null);
+    setVectorElapsed(0);
+    startTimer(vectorStart, vectorTimer, setVectorElapsed);
     try {
       const r = await fetch("/api/search/lancedb", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docId: "demo", query }),
+        body: JSON.stringify({
+          docId: "demo",
+          query,
+          topK: settings.vectorTopK,
+        }),
         signal: controller.signal,
       });
       const j = await r.json();
-      setLancedbTime(performance.now() - lancedbStart.current);
-      setLancedbResults(j.results || []);
+      if (j.passages) {
+        setVectorResult(j);
+      } else {
+        setVectorResult({
+          passages: [],
+          timing: { totalMs: 0, steps: [] },
+        });
+      }
     } catch (e: any) {
-      if (e.name === "AbortError") {
-        setLancedbResults([]);
+      if (e.name !== "AbortError") {
+        setVectorResult({
+          passages: [],
+          timing: { totalMs: 0, steps: [] },
+        });
       }
     } finally {
-      if (lancedbTimer.current) clearInterval(lancedbTimer.current);
-      setLancedbLoading(false);
+      stopTimer(vectorTimer);
+      setVectorLoading(false);
     }
+  }
+
+  async function runHybrid() {
+    hybridAbort.current?.abort();
+    stopTimer(hybridTimer);
+    const controller = new AbortController();
+    hybridAbort.current = controller;
+    setHybridLoading(true);
+    setHybridResult(null);
+    setHybridElapsed(0);
+    startTimer(hybridStart, hybridTimer, setHybridElapsed);
+    try {
+      const r = await fetch("/api/search/hybrid", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          docId: "demo",
+          query,
+          bm25TopK: settings.bm25TopK,
+          vectorTopK: settings.vectorTopK,
+          rerankTopN: settings.rerankTopN,
+        }),
+        signal: controller.signal,
+      });
+      const j = await r.json();
+      if (j.passages) {
+        setHybridResult(j);
+      } else if (j.error) {
+        setHybridResult({
+          passages: [],
+          answer: j.error,
+          timing: {
+            totalMs: Math.round(performance.now() - hybridStart.current),
+            steps: [],
+          },
+        });
+      }
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        setHybridResult({
+          passages: [],
+          answer: e.message || "Request failed",
+          timing: {
+            totalMs: Math.round(performance.now() - hybridStart.current),
+            steps: [],
+          },
+        });
+      }
+    } finally {
+      stopTimer(hybridTimer);
+      setHybridLoading(false);
+    }
+  }
+
+  function runAll() {
+    if (!query.trim()) return;
+    runBm25();
+    runGemini();
+    runVector();
+    runHybrid();
   }
 
   function formatTime(ms: number): string {
@@ -334,37 +462,52 @@ export default function Page() {
     return `${ms.toFixed(0)}ms`;
   }
 
-  function cancelGemini() {
-    geminiAbort.current?.abort();
-  }
-
-  function cancelLanceDb() {
-    lancedbAbort.current?.abort();
-  }
-
   function highlight(text: string): React.ReactNode {
     if (!query.trim()) return text;
-    const words = query
+    const cleanQuery = query.replace(/^"|"$/g, "");
+    const words = cleanQuery
       .replace(/[^\w\s]/g, "")
       .split(/\s+/)
       .filter(Boolean);
     if (words.length === 0) return text;
-    const pattern = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+    const pattern = new RegExp(
+      `(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
+      "gi"
+    );
     const parts = text.split(pattern);
     return parts.map((part, i) =>
-      pattern.test(part)
-        ? <mark key={i} style={{
+      pattern.test(part) ? (
+        <mark
+          key={i}
+          style={{
             background: "rgba(108, 92, 231, 0.35)",
             color: "var(--text)",
             borderRadius: 3,
             padding: "1px 2px",
-          }}>{part}</mark>
-        : part
+          }}
+        >
+          {part}
+        </mark>
+      ) : (
+        part
+      )
     );
   }
 
-  const best = bm25.length ? Math.min(...bm25.map((r) => r.score)) : 0;
-  const bestLancedb = lancedbResults.length ? Math.max(...lancedbResults.map((r) => r.score)) : 0;
+  function handleLoadSample() {
+    fetch("/api/sample-doc")
+      .then((r) => r.json())
+      .then((j) => {
+        if (j.text) setText(j.text);
+      });
+  }
+
+  function handleSelectQuery(q: string) {
+    setQuery(q);
+  }
+
+  const docStats = indexInfo || undefined;
+  const hybridTrace = hybridResult?.meta?.trace as AgentTrace | undefined;
 
   return (
     <div style={s.wrapper}>
@@ -381,139 +524,202 @@ export default function Page() {
             transition: "color 0.2s",
           }}
           onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text)")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.color = "var(--text-muted)")
+          }
           aria-label="View on GitHub"
         >
-          <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+          >
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
           </svg>
         </a>
-        <h1 style={s.title}>BM25 vs Gemini vs Vector Search</h1>
-        <p style={s.subtitle}>Compare local full-text search, AI-powered retrieval, and semantic vector search</p>
+        <h1 style={s.title}>BM25 vs Gemini vs Vector vs Hybrid Search</h1>
+        <p style={s.subtitle}>
+          Compare full-text search, AI retrieval, semantic vectors, and hybrid
+          RAG pipelines
+        </p>
         <div style={s.infoBox}>
           <p>
-            <strong>BM25</strong> is a ranking algorithm built into SQLite via its
-            FTS5 (Full-Text Search) engine. It scores documents by term frequency
-            (how often your search words appear) weighted by inverse document
-            frequency (rarer words matter more). It runs entirely locally in
-            milliseconds with zero API calls.
+            <strong>BM25</strong> is a ranking algorithm built into SQLite via
+            its FTS5 engine. It scores documents by term frequency weighted by
+            inverse document frequency. Runs locally in milliseconds.
           </p>
           <p style={{ marginTop: 8 }}>
-            <strong>Gemini 3 Flash</strong> is Google{"'"}s fast multimodal model. It
-            reads the full document and reasons about your query to produce a
-            natural-language answer. Powerful, but requires a network round-trip.
+            <strong>Gemini</strong> reads the full document and reasons about
+            your query to produce natural-language answers. Powerful but requires
+            a network round-trip.
           </p>
           <p style={{ marginTop: 8 }}>
-            <strong>Vector Search</strong> uses Gemini embeddings to convert text into
-            high-dimensional vectors, then finds chunks whose meaning is closest to your
-            query via cosine similarity in LanceDB. It captures semantic meaning beyond
-            exact keyword matches.
+            <strong>Vector Search</strong> uses Gemini embeddings + LanceDB
+            cosine similarity. Captures semantic meaning beyond exact keyword
+            matches.
+          </p>
+          <p style={{ marginTop: 8 }}>
+            <strong style={{ color: "var(--hybrid)" }}>Hybrid</strong> combines
+            BM25 + Vector retrieval, deduplicates with Reciprocal Rank Fusion,
+            reranks with Gemini, and generates a cited answer. The best of all
+            worlds.
           </p>
         </div>
       </header>
 
       <div style={s.card}>
         <label style={s.label}>Document</label>
+        <PresetBar
+          onLoadSample={handleLoadSample}
+          onSelectQuery={handleSelectQuery}
+        />
         <textarea
           style={s.textarea}
           placeholder="Paste a large document here..."
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
-        <div style={{ marginTop: 12 }}>
-          <button style={s.btnSecondary} onClick={indexDoc}>Index Document</button>
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <button
+            style={{
+              ...s.btnSecondary,
+              position: "relative" as const,
+              overflow: "hidden",
+              minWidth: 180,
+              pointerEvents: indexing ? "none" : undefined,
+              borderColor: indexing ? "var(--accent)" : undefined,
+            }}
+            onClick={indexDoc}
+            disabled={indexing}
+          >
+            {indexing && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  height: "100%",
+                  width: `${indexProgress}%`,
+                  background:
+                    "linear-gradient(90deg, rgba(108,92,231,0.25), rgba(162,155,254,0.35))",
+                  transition: "width 0.4s ease",
+                  borderRadius: 10,
+                }}
+              />
+            )}
+            <span style={{ position: "relative", zIndex: 1 }}>
+              {indexing ? indexStage : "Index Document"}
+            </span>
+          </button>
+          {indexInfo && <span style={s.indexInfo}>{indexInfo}</span>}
         </div>
       </div>
+
+      <SettingsPanel
+        settings={settings}
+        onChange={setSettings}
+        onReindex={indexDoc}
+      />
 
       <div style={s.card}>
         <label style={s.label}>Search</label>
         <div style={s.searchRow}>
           <input
             style={s.input}
-            placeholder="Enter your search query..."
+            placeholder='Enter your search query... (use "quotes" for exact phrase)'
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { runBm25(); runGemini(); runLanceDb(); } }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") runAll();
+            }}
           />
-          <button style={s.btnPrimary} onClick={() => { runBm25(); runGemini(); runLanceDb(); }}>Search</button>
+          <button style={s.btnPrimary} onClick={runAll}>
+            Search
+          </button>
         </div>
       </div>
 
-      <div style={s.grid}>
-        <div style={s.card}>
-          <div style={s.colHeader}>
-            <span style={s.colTitle}>BM25</span>
-            {bm25Time !== null && <span style={s.badge}>{formatTime(bm25Time)}</span>}
-          </div>
-          {bm25.length === 0 && <p style={s.empty}>No results yet</p>}
-          {bm25.map((r, i) => {
-            const pct = best ? Math.round((r.score / best) * 100) : 0;
-            return (
-              <div key={i} style={s.resultCard}>
-                <div style={s.scoreRow}>
-                  <div style={s.barTrack}>
-                    <div style={{
-                      width: `${pct}%`,
-                      height: "100%",
-                      borderRadius: 3,
-                      background: `linear-gradient(90deg, #6c5ce7, #74b9ff)`,
-                      transition: "width 0.3s ease",
-                    }} />
-                  </div>
-                  <span style={s.scoreMeta}>{r.score.toFixed(2)} ({pct}%)</span>
-                </div>
-                <div style={s.resultText}>{highlight(r.text)}</div>
-              </div>
-            );
-          })}
-        </div>
+      <div className="search-grid" style={s.grid}>
+        <SearchLane
+          title="BM25"
+          result={bm25Result}
+          loading={bm25Loading}
+          elapsed={0}
+          gradient="linear-gradient(90deg, #6c5ce7, #74b9ff)"
+          query={query}
+          formatTime={formatTime}
+          highlight={highlight}
+          docStats={docStats}
+        />
 
-        <div style={s.card}>
-          <div style={s.colHeader}>
-            <span style={s.colTitle}>Gemini 3 Flash</span>
-            {geminiTime !== null && <span style={s.badge}>{formatTime(geminiTime)}</span>}
-            {geminiLoading && <span style={s.badge}>{formatTime(geminiElapsed)}</span>}
-            {geminiLoading && (
-              <button style={s.btnCancel} onClick={cancelGemini}>Cancel</button>
-            )}
-          </div>
-          {!gemini && !geminiLoading && <p style={s.empty}>No results yet</p>}
-          {geminiLoading && !gemini && <p style={s.empty}>Thinking...</p>}
-          {gemini && <pre style={s.geminiOutput}>{highlight(gemini)}</pre>}
-        </div>
+        <SearchLane
+          title="Gemini"
+          result={geminiResult}
+          loading={geminiLoading}
+          elapsed={geminiElapsed}
+          gradient="linear-gradient(90deg, #fd79a8, #e84393)"
+          query={query}
+          onCancel={() => geminiAbort.current?.abort()}
+          formatTime={formatTime}
+          highlight={highlight}
+        >
+          {geminiResult?.answer && (
+            <div
+              style={{
+                whiteSpace: "pre-wrap",
+                fontSize: 13,
+                lineHeight: 1.7,
+                color: "var(--text-muted)",
+                background: "var(--surface-2)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: 16,
+                marginBottom: 16,
+                maxHeight: 200,
+                overflow: "auto",
+              }}
+            >
+              {geminiResult.answer}
+            </div>
+          )}
+        </SearchLane>
 
-        <div style={s.card}>
-          <div style={s.colHeader}>
-            <span style={s.colTitle}>Vector Search</span>
-            {lancedbTime !== null && <span style={s.badge}>{formatTime(lancedbTime)}</span>}
-            {lancedbLoading && <span style={s.badge}>{formatTime(lancedbElapsed)}</span>}
-            {lancedbLoading && (
-              <button style={s.btnCancel} onClick={cancelLanceDb}>Cancel</button>
-            )}
-          </div>
-          {lancedbResults.length === 0 && !lancedbLoading && <p style={s.empty}>No results yet</p>}
-          {lancedbLoading && lancedbResults.length === 0 && <p style={s.empty}>Searching...</p>}
-          {lancedbResults.map((r, i) => {
-            const pct = bestLancedb ? Math.round((r.score / bestLancedb) * 100) : 0;
-            return (
-              <div key={i} style={s.resultCard}>
-                <div style={s.scoreRow}>
-                  <div style={s.barTrack}>
-                    <div style={{
-                      width: `${pct}%`,
-                      height: "100%",
-                      borderRadius: 3,
-                      background: `linear-gradient(90deg, #00b894, #55efc4)`,
-                      transition: "width 0.3s ease",
-                    }} />
-                  </div>
-                  <span style={s.scoreMeta}>{r.score.toFixed(4)} ({pct}%)</span>
-                </div>
-                <div style={s.resultText}>{highlight(r.text)}</div>
-              </div>
-            );
-          })}
-        </div>
+        <SearchLane
+          title="Vector Search"
+          result={vectorResult}
+          loading={vectorLoading}
+          elapsed={vectorElapsed}
+          gradient="linear-gradient(90deg, #00b894, #55efc4)"
+          query={query}
+          onCancel={() => vectorAbort.current?.abort()}
+          formatTime={formatTime}
+          highlight={highlight}
+        />
+
+        <SearchLane
+          title="Hybrid RAG"
+          result={hybridResult}
+          loading={hybridLoading}
+          elapsed={hybridElapsed}
+          gradient="linear-gradient(90deg, #e17055, #fdcb6e)"
+          query={query}
+          onCancel={() => hybridAbort.current?.abort()}
+          formatTime={formatTime}
+          highlight={highlight}
+        >
+          {hybridResult?.answer && (
+            <AnswerBlock answer={hybridResult.answer} />
+          )}
+          {hybridTrace && <AgentTraceBox trace={hybridTrace} />}
+        </SearchLane>
       </div>
     </div>
   );

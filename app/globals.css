@@ -14,6 +14,8 @@
   --accent: #6c5ce7;
   --accent-2: #a29bfe;
   --gradient: linear-gradient(135deg, #6c5ce7, #a29bfe, #74b9ff);
+  --hybrid: #e17055;
+  --hybrid-2: #fdcb6e;
 }
 
 body {
@@ -32,3 +34,15 @@ body {
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+@media (max-width: 1200px) {
+  .search-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .search-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

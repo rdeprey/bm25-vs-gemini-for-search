@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const BATCH_SIZE = 20;
-const MAX_RETRIES = 3;
+const BATCH_SIZE = 5;
+const MAX_RETRIES = 5;
+const INTER_BATCH_DELAY_MS = 2000;
 
 function getEmbeddingModel() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -29,7 +30,12 @@ async function batchWithRetry(
     } catch (e: any) {
       const is429 = e?.status === 429 || e?.message?.includes("429");
       if (is429 && attempt < MAX_RETRIES - 1) {
-        const delay = Math.pow(2, attempt + 1) * 1000;
+        // Try to parse the API's suggested retry delay
+        let delay = Math.pow(2, attempt + 1) * 3000; // 6s, 12s, 24s, 48s
+        const retryMatch = JSON.stringify(e?.errorDetails ?? "").match(/retryDelay.*?(\d+)s/);
+        if (retryMatch) {
+          delay = Math.max(delay, parseInt(retryMatch[1], 10) * 1000 + 1000);
+        }
         console.log(`Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`);
         await sleep(delay);
         continue;
@@ -40,7 +46,10 @@ async function batchWithRetry(
   throw new Error("Unreachable");
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export async function embedTexts(
+  texts: string[],
+  onProgress?: (embedded: number, total: number) => void
+): Promise<number[][]> {
   const model = getEmbeddingModel();
   const allEmbeddings: number[][] = [];
 
@@ -48,9 +57,10 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
     const batch = texts.slice(i, i + BATCH_SIZE);
     const embeddings = await batchWithRetry(model, batch);
     allEmbeddings.push(...embeddings);
+    onProgress?.(Math.min(i + BATCH_SIZE, texts.length), texts.length);
     // Pause between batches to avoid rate limits
     if (i + BATCH_SIZE < texts.length) {
-      await sleep(500);
+      await sleep(INTER_BATCH_DELAY_MS);
     }
   }
 

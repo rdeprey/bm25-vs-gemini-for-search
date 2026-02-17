@@ -1,6 +1,7 @@
 import * as lancedb from "@lancedb/lancedb";
 import path from "path";
 import fs from "fs";
+import { ChunkWithMeta } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data", "lancedb");
 
@@ -27,13 +28,16 @@ export async function resetLanceTable(docId: string) {
 
 export async function insertVectors(
   docId: string,
-  chunks: string[],
+  chunks: ChunkWithMeta[],
+  chunkIds: number[],
   vectors: number[][]
 ) {
   const db = await getLanceDb();
-  const data = chunks.map((text, i) => ({
-    text,
+  const data = chunks.map((chunk, i) => ({
+    text: chunk.text,
     vector: vectors[i],
+    chunkId: chunkIds[i],
+    section: chunk.section ?? "",
   }));
   await db.createTable(tableName(docId), data, { mode: "overwrite" });
 }
@@ -42,7 +46,7 @@ export async function searchVectors(
   docId: string,
   queryVector: number[],
   limit = 10
-): Promise<{ text: string; score: number }[]> {
+): Promise<{ text: string; score: number; chunkId: number; section: string }[]> {
   const db = await getLanceDb();
   const tables = await db.tableNames();
   if (!tables.includes(tableName(docId))) return [];
@@ -57,5 +61,7 @@ export async function searchVectors(
   return results.map((r: any) => ({
     text: r.text,
     score: 1 - (r._distance ?? 0),
+    chunkId: r.chunkId ?? 0,
+    section: r.section ?? "",
   }));
 }
